@@ -730,8 +730,8 @@ with tab8:
         curve_y = sigmoid(logistic_coef * curve_x + logistic_intercept)
 
         logistic_figure = go.Figure()
-        for predicted_value, color, label in [(0, "#dc2626", "predicted: fail"), (1, "#16a34a", "predicted: pass")]:
-            subset_mask = predicted_classes == predicted_value
+        for actual_value, color, label in [(0, "#dc2626", "actual: failed"), (1, "#16a34a", "actual: passed")]:
+            subset_mask = actual_classes == actual_value
             logistic_figure.add_trace(
                 go.Scatter(
                     x=pass_df.loc[subset_mask, "hours_studied"], y=pass_df.loc[subset_mask, "passed"],
@@ -749,11 +749,15 @@ with tab8:
             )
         )
         logistic_figure.update_layout(
-            title="Logistic Regression Fit — points colored by current predicted class",
+            title="Logistic Regression Fit — points colored by actual outcome",
             xaxis_title="Hours studied", yaxis_title="Probability of passing",
             template="plotly_white", height=550,
         )
         st.plotly_chart(logistic_figure, use_container_width=True)
+        st.caption(
+            "Points colored by their real outcome, not the model's prediction. Any point on the wrong side "
+            "of the dashed threshold line is a misclassification at the current threshold."
+        )
 
 # ---------------------------------------------------------------------------
 # TAB 9 — Decision Boundary
