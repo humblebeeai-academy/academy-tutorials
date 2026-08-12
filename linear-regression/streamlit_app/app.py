@@ -8,8 +8,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import statsmodels.api as sm
 import streamlit as st
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, LogisticRegression
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -26,11 +27,27 @@ def load_2d_data():
     return pd.read_csv(DATA_DIR / "study_scores_2d.csv")
 
 
+@st.cache_data
+def load_classification_data():
+    return pd.read_csv(DATA_DIR / "exam_pass_classification_full.csv")
+
+
+@st.cache_data
+def load_classification_2d_data():
+    return pd.read_csv(DATA_DIR / "exam_pass_2d.csv")
+
+
 scores_1d = load_1d_data()
 scores_2d = load_2d_data()
+pass_df = load_classification_data()
+pass_2d_df = load_classification_2d_data()
 
 SLOPE_MIN, SLOPE_MAX = -2.0, 12.0
 INTERCEPT_MIN, INTERCEPT_MAX = 0.0, 70.0
+
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
 
 
 @st.cache_resource
@@ -47,8 +64,24 @@ def fit_2d_model(dataframe):
     return model
 
 
+@st.cache_resource
+def fit_logistic_model(dataframe):
+    model = LogisticRegression()
+    model.fit(dataframe[["hours_studied"]], dataframe["passed"])
+    return model
+
+
+@st.cache_resource
+def fit_logistic_model_2d(dataframe):
+    model = LogisticRegression()
+    model.fit(dataframe[["hours_studied", "practice_problems"]], dataframe["passed"])
+    return model
+
+
 best_1d_model = fit_1d_model(scores_1d)
 best_2d_model = fit_2d_model(scores_2d)
+logistic_model = fit_logistic_model(pass_df)
+logistic_model_2d = fit_logistic_model_2d(pass_2d_df)
 
 
 def compute_predictions_1d(dataframe, slope, intercept):
@@ -78,12 +111,21 @@ st.session_state.setdefault("plane_intercept", 30.0)
 st.session_state.setdefault("plane_w1", 4.0)
 st.session_state.setdefault("plane_w2", 1.0)
 st.session_state.setdefault("reveal_best_plane", False)
+st.session_state.setdefault("r2_slope", 5.0)
+st.session_state.setdefault("r2_intercept", 35.0)
+st.session_state.setdefault("sampling_history", [])
+st.session_state.setdefault("sampling_true_slope", 5.0)
+st.session_state.setdefault("classification_threshold", 0.5)
 
 st.title("Linear Regression Playground")
 st.caption("Fit the model yourself before letting the computer do it.")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["1. Fit a Line", "2. Understand Errors", "3. Loss Landscape", "4. Fit a Plane", "5. Many Features"]
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
+    [
+        "1. Fit a Line", "2. Understand Errors", "3. Loss Landscape", "4. Fit a Plane", "5. Many Features",
+        "6. R² Playground", "7. Sampling Variability",
+        "8. Logistic Regression", "9. Decision Boundary",
+    ]
 )
 
 # ---------------------------------------------------------------------------
@@ -466,4 +508,293 @@ model.coef_.shape = (40,)
         "Linear regression is called **linear** because these weighted feature contributions "
         "are added together linearly. The geometry becomes impossible to picture past 2-3 features, "
         "but the mathematical idea has not changed."
+    )
+
+# ---------------------------------------------------------------------------
+# TAB 6 — R² Playground
+# ---------------------------------------------------------------------------
+with tab6:
+    st.subheader("R² Playground")
+    st.write(
+        "R² compares your line's error against the simplest possible baseline: always predicting the mean. "
+        "Move the slope and intercept and watch R² respond."
+    )
+
+    r2_control_col, r2_plot_col = st.columns([1, 2])
+
+    baseline_prediction_r2 = scores_1d["exam_score"].mean()
+    sst_r2 = float(((scores_1d["exam_score"] - baseline_prediction_r2) ** 2).sum())
+
+    with r2_control_col:
+        r2_slope = st.slider("Slope (m)", SLOPE_MIN, SLOPE_MAX, st.session_state["r2_slope"], 0.1, key="r2_slope")
+        r2_intercept = st.slider(
+            "Intercept (b)", INTERCEPT_MIN, INTERCEPT_MAX, st.session_state["r2_intercept"], 0.5, key="r2_intercept"
+        )
+
+        r2_sse = compute_sse_1d(scores_1d, r2_slope, r2_intercept)
+        r2_value = 1 - r2_sse / sst_r2
+
+        st.markdown(f"**Baseline SSE (= SST):** {sst_r2:.1f}")
+        st.markdown(f"**Your regression SSE:** {r2_sse:.1f}")
+        st.markdown(f"**R² = 1 − SSE/SST = {r2_value:.3f}**")
+
+        if r2_value < 0:
+            st.warning(
+                "R² is negative! That means this line is doing *worse* than simply predicting the "
+                "mean for every student — try a value closer to the earlier best-fit line to see R² recover."
+            )
+        elif r2_value > 0.8:
+            st.success("Strong fit — this line explains most of the variation relative to the mean baseline.")
+
+    with r2_plot_col:
+        r2_line_x = np.linspace(scores_1d["hours_studied"].min() - 0.5, scores_1d["hours_studied"].max() + 0.5, 50)
+        r2_predictions = compute_predictions_1d(scores_1d, r2_slope, r2_intercept)
+
+        r2_figure = go.Figure()
+        r2_figure.add_trace(
+            go.Scatter(
+                x=scores_1d["hours_studied"], y=scores_1d["exam_score"], mode="markers",
+                marker=dict(size=11, color="#2563eb"), name="actual",
+            )
+        )
+        r2_figure.add_hline(y=baseline_prediction_r2, line=dict(color="#f59e0b", width=3, dash="dash"))
+        r2_figure.add_trace(
+            go.Scatter(
+                x=[None], y=[None], mode="lines", line=dict(color="#f59e0b", width=3, dash="dash"),
+                name=f"baseline (mean = {baseline_prediction_r2:.1f})",
+            )
+        )
+        r2_figure.add_trace(
+            go.Scatter(
+                x=r2_line_x, y=r2_slope * r2_line_x + r2_intercept, mode="lines",
+                line=dict(color="#dc2626", width=3), name=f"your line: y = {r2_slope:.1f}x + {r2_intercept:.1f}",
+            )
+        )
+        for xi, yi, pi in zip(scores_1d["hours_studied"], scores_1d["exam_score"], r2_predictions):
+            r2_figure.add_trace(
+                go.Scatter(
+                    x=[xi, xi], y=[pi, yi], mode="lines",
+                    line=dict(color="#16a34a", width=1.5, dash="dot"), showlegend=False,
+                )
+            )
+        r2_figure.update_layout(
+            title=f"R² = {r2_value:.3f}",
+            xaxis_title="Hours studied", yaxis_title="Exam score",
+            template="plotly_white", height=550,
+        )
+        st.plotly_chart(r2_figure, use_container_width=True)
+
+# ---------------------------------------------------------------------------
+# TAB 7 — Sampling Variability
+# ---------------------------------------------------------------------------
+with tab7:
+    st.subheader("Sampling Variability")
+    st.write(
+        "Our dataset is only one sample. Every time you generate a new one from the same underlying "
+        "relationship, the fitted slope and its p-value come out a little different."
+    )
+
+    sampling_control_col, sampling_plot_col = st.columns([1, 2])
+
+    with sampling_control_col:
+        true_slope = st.slider(
+            "True slope (the real, unknown relationship)", 0.0, 8.0, st.session_state["sampling_true_slope"], 0.5,
+            key="sampling_true_slope",
+            help="Set this to 0 to simulate a feature that truly has no effect, and watch how often you still get a 'significant'-looking slope by chance.",
+        )
+
+        if st.button("Generate another sample"):
+            sample_rng = np.random.default_rng()
+            sample_x = sample_rng.uniform(1, 9, size=30)
+            sample_y = 40 + true_slope * sample_x + sample_rng.normal(loc=0, scale=10, size=30)
+
+            sample_X_sm = sm.add_constant(sample_x)
+            sample_results = sm.OLS(sample_y, sample_X_sm).fit()
+            sample_slope = sample_results.params[1]
+            sample_p_value = sample_results.pvalues[1]
+
+            st.session_state["sampling_history"].append(
+                {"sample": len(st.session_state["sampling_history"]) + 1, "slope": sample_slope, "p_value": sample_p_value}
+            )
+            st.session_state["_latest_sample_x"] = sample_x
+            st.session_state["_latest_sample_y"] = sample_y
+
+        if st.button("Clear history"):
+            st.session_state["sampling_history"] = []
+            st.session_state.pop("_latest_sample_x", None)
+            st.session_state.pop("_latest_sample_y", None)
+            st.rerun()
+
+        if st.session_state["sampling_history"]:
+            history_df = pd.DataFrame(st.session_state["sampling_history"])
+            significant_count = (history_df["p_value"] < 0.05).sum()
+            st.markdown(f"**Samples drawn:** {len(history_df)}")
+            st.markdown(f"**Came back \"significant\" (p < 0.05):** {significant_count} / {len(history_df)}")
+            st.dataframe(history_df.round(4), use_container_width=True, hide_index=True)
+        else:
+            st.info("Click **Generate another sample** to draw your first sample.")
+
+    with sampling_plot_col:
+        if "_latest_sample_x" in st.session_state:
+            latest_x = st.session_state["_latest_sample_x"]
+            latest_y = st.session_state["_latest_sample_y"]
+            latest_row = st.session_state["sampling_history"][-1]
+
+            sample_figure = go.Figure()
+            sample_figure.add_trace(
+                go.Scatter(x=latest_x, y=latest_y, mode="markers", marker=dict(size=10, color="#2563eb"), name="sample")
+            )
+            fit_line_x = np.linspace(0, 10, 50)
+            sample_figure.add_trace(
+                go.Scatter(
+                    x=fit_line_x, y=latest_row["slope"] * fit_line_x + (latest_y.mean() - latest_row["slope"] * latest_x.mean()),
+                    mode="lines", line=dict(color="#dc2626", width=3),
+                    name=f"fitted slope = {latest_row['slope']:.2f}, p = {latest_row['p_value']:.3f}",
+                )
+            )
+            sample_figure.update_layout(
+                title=f"Most Recent Sample (true slope = {true_slope})",
+                xaxis_title="x", yaxis_title="y",
+                template="plotly_white", height=450,
+            )
+            st.plotly_chart(sample_figure, use_container_width=True)
+
+        if len(st.session_state["sampling_history"]) >= 3:
+            history_df = pd.DataFrame(st.session_state["sampling_history"])
+            slope_history_figure = go.Figure()
+            slope_history_figure.add_trace(
+                go.Scatter(x=history_df["sample"], y=history_df["slope"], mode="markers+lines",
+                           marker=dict(size=9, color="#7c3aed"), line=dict(color="#7c3aed", width=1))
+            )
+            slope_history_figure.add_hline(y=true_slope, line=dict(color="#16a34a", width=2, dash="dash"))
+            slope_history_figure.update_layout(
+                title="Estimated Slope Across Your Samples (green = true slope)",
+                xaxis_title="Sample #", yaxis_title="Estimated slope",
+                template="plotly_white", height=350,
+            )
+            st.plotly_chart(slope_history_figure, use_container_width=True)
+
+# ---------------------------------------------------------------------------
+# TAB 8 — Logistic Regression
+# ---------------------------------------------------------------------------
+with tab8:
+    st.subheader("Logistic Regression")
+    st.write(
+        "Ordinary linear regression can't stay inside 0-1 for a pass/fail outcome. Logistic regression "
+        "squashes the weighted sum through a sigmoid so the output is always a valid probability."
+    )
+
+    logistic_control_col, logistic_plot_col = st.columns([1, 2])
+
+    logistic_coef = logistic_model.coef_[0][0]
+    logistic_intercept = logistic_model.intercept_[0]
+
+    with logistic_control_col:
+        threshold = st.slider(
+            "Decision threshold", 0.0, 1.0, st.session_state["classification_threshold"], 0.05,
+            key="classification_threshold",
+            help="Predictions with probability >= this value are classified as 'pass'.",
+        )
+
+        probabilities = sigmoid(logistic_coef * pass_df["hours_studied"] + logistic_intercept)
+        predicted_classes = (probabilities >= threshold).astype(int)
+        actual_classes = pass_df["passed"]
+
+        true_positive = int(((predicted_classes == 1) & (actual_classes == 1)).sum())
+        true_negative = int(((predicted_classes == 0) & (actual_classes == 0)).sum())
+        false_positive = int(((predicted_classes == 1) & (actual_classes == 0)).sum())
+        false_negative = int(((predicted_classes == 0) & (actual_classes == 1)).sum())
+        accuracy = (true_positive + true_negative) / len(actual_classes)
+
+        st.markdown(f"**Threshold:** {threshold:.2f}")
+        st.markdown(f"**Accuracy at this threshold:** {accuracy:.3f}")
+
+        confusion_df = pd.DataFrame(
+            {"Predicted: fail": [true_negative, false_negative], "Predicted: pass": [false_positive, true_positive]},
+            index=["Actual: fail", "Actual: pass"],
+        )
+        st.dataframe(confusion_df, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("**Predict for a new student**")
+        new_hours_logistic = st.number_input(
+            "Hours studied", min_value=0.0, max_value=15.0, value=5.0, step=0.5, key="new_hours_logistic"
+        )
+        new_probability = sigmoid(logistic_coef * new_hours_logistic + logistic_intercept)
+        new_class = "pass" if new_probability >= threshold else "fail"
+        st.markdown(f"Predicted probability of passing: **{new_probability:.3f}**")
+        st.markdown(f"Predicted class at threshold {threshold:.2f}: **{new_class}**")
+
+    with logistic_plot_col:
+        curve_x = np.linspace(0, 10, 200)
+        curve_y = sigmoid(logistic_coef * curve_x + logistic_intercept)
+
+        logistic_figure = go.Figure()
+        for predicted_value, color, label in [(0, "#dc2626", "predicted: fail"), (1, "#16a34a", "predicted: pass")]:
+            subset_mask = predicted_classes == predicted_value
+            logistic_figure.add_trace(
+                go.Scatter(
+                    x=pass_df.loc[subset_mask, "hours_studied"], y=pass_df.loc[subset_mask, "passed"],
+                    mode="markers", marker=dict(size=11, color=color), name=label,
+                )
+            )
+        logistic_figure.add_trace(
+            go.Scatter(x=curve_x, y=curve_y, mode="lines", line=dict(color="#2563eb", width=3), name="fitted sigmoid")
+        )
+        logistic_figure.add_hline(y=threshold, line=dict(color="#f59e0b", width=2, dash="dash"))
+        logistic_figure.add_trace(
+            go.Scatter(
+                x=[new_hours_logistic], y=[new_probability], mode="markers",
+                marker=dict(size=14, color="#7c3aed", symbol="star"), name="new prediction",
+            )
+        )
+        logistic_figure.update_layout(
+            title="Logistic Regression Fit — points colored by current predicted class",
+            xaxis_title="Hours studied", yaxis_title="Probability of passing",
+            template="plotly_white", height=550,
+        )
+        st.plotly_chart(logistic_figure, use_container_width=True)
+
+# ---------------------------------------------------------------------------
+# TAB 9 — Decision Boundary
+# ---------------------------------------------------------------------------
+with tab9:
+    st.subheader("Decision Boundary")
+    st.write(
+        "With two features, logistic regression separates the feature plane with a straight boundary line "
+        "instead of a single threshold point."
+    )
+
+    boundary_w1, boundary_w2 = logistic_model_2d.coef_[0]
+    boundary_b = logistic_model_2d.intercept_[0]
+
+    boundary_x1 = np.linspace(pass_2d_df["hours_studied"].min(), pass_2d_df["hours_studied"].max(), 50)
+    boundary_x2 = -(boundary_b + boundary_w1 * boundary_x1) / boundary_w2
+
+    boundary_figure = go.Figure()
+    for passed_value, color, label in [(0, "#dc2626", "failed"), (1, "#16a34a", "passed")]:
+        subset = pass_2d_df[pass_2d_df["passed"] == passed_value]
+        boundary_figure.add_trace(
+            go.Scatter(
+                x=subset["hours_studied"], y=subset["practice_problems"], mode="markers",
+                marker=dict(size=10, color=color), name=label,
+                hovertemplate="Hours: %{x}<br>Problems: %{y}<extra></extra>",
+            )
+        )
+    boundary_figure.add_trace(
+        go.Scatter(
+            x=boundary_x1, y=boundary_x2, mode="lines",
+            line=dict(color="#7c3aed", width=3, dash="dash"), name="decision boundary (p = 0.5)",
+        )
+    )
+    boundary_figure.update_layout(
+        title="Decision Boundary: Hours Studied + Practice Problems",
+        xaxis_title="Hours studied", yaxis_title="Practice problems",
+        template="plotly_white", height=600,
+    )
+    st.plotly_chart(boundary_figure, use_container_width=True)
+
+    st.markdown(
+        f"**Fitted model:** coefficients = ({boundary_w1:.3f}, {boundary_w2:.3f}), intercept = {boundary_b:.3f}  \n"
+        f"Everything on one side of the dashed line is predicted \"pass,\" everything on the other \"fail.\""
     )
