@@ -46,6 +46,8 @@ Session 2's notebook, `notebooks/02a_r2_and_statistical_inference.ipynb`, and Se
 
 Session 4 (`notebooks/04a_decision_trees.ipynb`) and Session 5 (`notebooks/05a_random_forest.ipynb`) each get a student workbook too — `04b_student_workbook.ipynb` and `05b_student_workbook.ipynb` — following `01b`'s same TODO-then-collapsed-solution pattern (e.g. "try `max_depth=1, 3, None` and compare train vs. test accuracy").
 
+Finally, `notebooks/06_capstone_assessment.ipynb` is a self-contained assessment: same TODO/collapsed-solution/Final-Check format as the workbooks, but applied to a real dataset for the first time — the [Heart Failure Prediction Dataset](https://www.kaggle.com/datasets/fedesoriano/heart-failure-prediction) from Kaggle (saved locally, no Kaggle account needed). It checks whether Sessions 1-5's ideas (EDA, encoding, train/test splits, decision trees, overfitting, feature importance) transfer to messier, real-world data — including a data-quality gotcha (`Cholesterol` uses `0` as a missing-value placeholder that `.isna()` won't catch) and `sklearn.metrics`' confusion matrix / classification report as a step up from Session 3's hand-built version.
+
 ## Streamlit
 
 Two interactive playgrounds, both good for projecting during class.
@@ -91,7 +93,8 @@ A separate app, covering decision trees and random forest:
 │   ├── 04a_decision_trees.ipynb                  # Session 4, instructor-led lesson
 │   ├── 04b_student_workbook.ipynb                # Session 4, fill-in-the-blank exercises
 │   ├── 05a_random_forest.ipynb                   # Session 5, instructor-led lesson
-│   └── 05b_student_workbook.ipynb                # Session 5, fill-in-the-blank exercises
+│   ├── 05b_student_workbook.ipynb                # Session 5, fill-in-the-blank exercises
+│   └── 06_capstone_assessment.ipynb              # Capstone, real Kaggle dataset, TODO/solution assessment
 │
 ├── streamlit_app/
 │   ├── app.py                               # Sessions 1-3 interactive playground (9 tabs)
@@ -104,7 +107,8 @@ A separate app, covering decision trees and random forest:
 │   ├── exam_pass_classification.csv        # hours_studied -> passed (0/1), 10 rows, cliffhanger/recap only
 │   ├── exam_pass_classification_full.csv   # hours_studied -> passed (0/1), ~45 rows, main teaching dataset
 │   ├── exam_pass_2d.csv                    # hours_studied, practice_problems -> passed (0/1)
-│   └── exam_pass_3d.csv                    # hours_studied, practice_problems, sleep_hours(noise) -> passed
+│   ├── exam_pass_3d.csv                    # hours_studied, practice_problems, sleep_hours(noise) -> passed
+│   └── heart_failure.csv                   # 918 rows, 11 clinical features -> HeartDisease (0/1); source: Kaggle "Heart Failure Prediction Dataset" (fedesoriano)
 │
 └── assets/
     └── README.md
